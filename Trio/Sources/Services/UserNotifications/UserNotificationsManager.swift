@@ -79,7 +79,7 @@ final class BaseUserNotificationsManager: NSObject, UserNotificationsManager, In
     private let backgroundContext = CoreDataStack.shared.newTaskContext()
 
     // Queue for handling Core Data change notifications
-    private let queue = DispatchQueue(label: "BaseUserNotificationsManager.queue", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "BaseUserNotificationsManager.queue", qos: .utility)
     private var coreDataPublisher: AnyPublisher<Set<NSManagedObjectID>, Never>?
     private var subscriptions = Set<AnyCancellable>()
 

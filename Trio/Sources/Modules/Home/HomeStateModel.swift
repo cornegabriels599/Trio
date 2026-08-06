@@ -27,7 +27,7 @@ extension Home {
             CGMSettings.StateModel.shared
         }
 
-        private let timer = DispatchTimer(timeInterval: 5)
+        private let timer = DispatchTimer(timeInterval: 15)
         private(set) var filteredHours = 24
         var startMarker = Date(timeIntervalSinceNow: TimeInterval(hours: -24))
         var endMarker = Date(timeIntervalSinceNow: TimeInterval(hours: 3))
@@ -141,7 +141,7 @@ extension Home {
         let viewContext = CoreDataStack.shared.persistentContainer.viewContext
 
         // Queue for handling Core Data change notifications
-        private let queue = DispatchQueue(label: "HomeStateModel.queue", qos: .userInitiated)
+        private let queue = DispatchQueue(label: "HomeStateModel.queue", qos: .utility)
         private var coreDataPublisher: AnyPublisher<Set<NSManagedObjectID>, Never>?
         private var subscriptions = Set<AnyCancellable>()
 
