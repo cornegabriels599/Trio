@@ -13,7 +13,6 @@ struct TimePicker: Identifiable {
 extension Home {
     struct RootView: BaseView {
         let resolver: Resolver
-        let safeAreaSize: CGFloat = 0.08
 
         @Environment(\.managedObjectContext) var moc
         @Environment(\.colorScheme) var colorScheme
@@ -34,7 +33,6 @@ extension Home {
         @State var selectedTab: Int = 0
         @State var showPumpSelection: Bool = false
         @State var showCGMSelection: Bool = false
-        @State var notificationsDisabled = false
         @State var timeButtons: [TimePicker] = [
             TimePicker(active: false, hours: 4),
             TimePicker(active: false, hours: 6),
@@ -419,7 +417,7 @@ extension Home {
             ZStack {
                 MainChartView(
                     geo: geo,
-                    safeAreaSize: notificationsDisabled == true ? safeAreaSize : 0,
+                    safeAreaSize: 0,
                     units: state.units,
                     hours: state.filteredHours,
                     highGlucose: state.highGlucose,
@@ -840,52 +838,6 @@ extension Home {
             }
         }
 
-        @ViewBuilder func alertSafetyNotificationsView(geo: GeometryProxy) -> some View {
-            ZStack {
-                /// rectangle as background
-                RoundedRectangle(cornerRadius: 15)
-                    .fill(
-                        Color(
-                            red: 0.9,
-                            green: 0.133333333,
-                            blue: 0.2156862745
-                        )
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 15))
-                    .frame(height: geo.size.height * safeAreaSize)
-                    .coordinateSpace(name: "alertSafetyNotificationsView")
-                    .shadow(
-                        color: colorScheme == .dark ? Color(red: 0.02745098039, green: 0.1098039216, blue: 0.1411764706) :
-                            Color.black.opacity(0.33),
-                        radius: 3
-                    )
-                HStack {
-                    Spacer()
-                    VStack {
-                        Text("⚠️ Safety Notifications are OFF")
-                            .font(.headline)
-                            .fontWeight(.bold)
-                            .fontDesign(.rounded)
-                            .foregroundStyle(.white.gradient)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Text("Fix now by turning Notifications ON.")
-                            .font(.footnote)
-                            .fontDesign(.rounded)
-                            .foregroundStyle(.white.gradient)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }.padding(.leading, 5)
-                    Spacer()
-                    Image(systemName: "chevron.right").foregroundColor(.white)
-                        .font(.headline)
-                }.padding(.horizontal, 10)
-                    .padding(.trailing, 8)
-                    .onTapGesture {
-                        UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!)
-                    }
-            }.padding(.horizontal, 10)
-                .padding(.top, 0)
-        }
-
         @ViewBuilder func mainViewElements(_ geo: GeometryProxy) -> some View {
             VStack(spacing: 0) {
                 ZStack {
@@ -912,9 +864,6 @@ extension Home {
                 }
                 .padding(.top, 10)
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    if notificationsDisabled {
-                        alertSafetyNotificationsView(geo: geo)
-                    }
                     if let badgeImage = state.pumpStatusBadgeImage, let badgeColor = state.pumpStatusBadgeColor {
                         pumpTimezoneView(badgeImage, badgeColor)
                             .padding(.horizontal, 20)
@@ -957,17 +906,6 @@ extension Home {
                 }
             }
             .background(appState.trioBackgroundColor(for: colorScheme))
-            .onReceive(
-                resolver.resolve(AlertPermissionsChecker.self)!.$notificationsDisabled,
-                perform: {
-                    if notificationsDisabled != $0 {
-                        notificationsDisabled = $0
-                        if notificationsDisabled {
-                            debug(.default, "notificationsDisabled")
-                        }
-                    }
-                }
-            )
         }
 
         @ViewBuilder func mainView() -> some View {
