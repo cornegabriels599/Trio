@@ -107,6 +107,7 @@ extension Home {
         var pumpStatusBadgeImage: UIImage?
         var pumpStatusBadgeColor: Color?
         var cgmAvailable: Bool = false
+        var cgmSensorWarmupStartDate: Date?
         var listOfCGM: [CGMModel] = []
         var cgmCurrent = cgmDefaultModel
         var pumpInitialSettings = PumpConfig.PumpInitialSettings.default
@@ -268,6 +269,7 @@ extension Home {
             coreDataPublisher?.filteredByEntityName("GlucoseStored").sink { [weak self] _ in
                 guard let self = self else { return }
                 self.setupGlucoseArray()
+                self.setupCGMSensorWarmup()
             }.store(in: &subscriptions)
 
             coreDataPublisher?.filteredByEntityName("CarbEntryStored").sink { [weak self] _ in
@@ -322,6 +324,7 @@ extension Home {
             timer.eventHandler = {
                 DispatchQueue.main.async { [weak self] in
                     self?.timerDate = Date()
+                    self?.setupCGMSensorWarmup()
                 }
             }
             timer.resume()
@@ -424,6 +427,7 @@ extension Home {
 
         @MainActor private func setupCGMSettings() async {
             cgmAvailable = fetchGlucoseManager.cgmGlucoseSourceType != CGMType.none
+            setupCGMSensorWarmup()
 
             listOfCGM = (
                 CGMType.allCases.filter { $0 != CGMType.plugin }.map {
@@ -467,6 +471,24 @@ extension Home {
                     displayName: settingsManager.settings.cgm.displayName,
                     subtitle: settingsManager.settings.cgm.subtitle
                 )
+            }
+        }
+
+        func setupCGMSensorWarmup() {
+            Task {
+                let latestStartDate = await provider.latestCGMSensorStartDate()
+
+                await MainActor.run {
+                    guard let latestStartDate else {
+                        cgmSensorWarmupStartDate = nil
+                        return
+                    }
+
+                    let warmupEndDate = latestStartDate.addingTimeInterval(60 * 60)
+                    let hasGlucoseAfterStart = latestTwoGlucoseValues.last?.date?.timeIntervalSince(latestStartDate) ?? -1 >= 0
+
+                    cgmSensorWarmupStartDate = !hasGlucoseAfterStart && warmupEndDate > Date() ? latestStartDate : nil
+                }
             }
         }
 

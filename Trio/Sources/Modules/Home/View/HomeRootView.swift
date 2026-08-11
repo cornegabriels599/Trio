@@ -129,6 +129,7 @@ extension Home {
                 lowGlucose: state.lowGlucose,
                 highGlucose: state.highGlucose,
                 cgmAvailable: state.cgmAvailable,
+                sensorWarmupStartDate: state.cgmSensorWarmupStartDate,
                 currentGlucoseTarget: state.currentGlucoseTarget,
                 glucoseColorScheme: state.glucoseColorScheme,
                 glucose: state.latestTwoGlucoseValues

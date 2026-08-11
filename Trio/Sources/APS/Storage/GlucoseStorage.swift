@@ -17,6 +17,7 @@ protocol GlucoseStorage {
     func filterTooFrequentGlucose(_ glucose: [BloodGlucose], at: Date) -> [BloodGlucose]
     func lastGlucoseDate() -> Date?
     func isGlucoseFresh() -> Bool
+    func storeCGMSensorStart(at sessionStartDate: Date, transmitterID: String?, activationDate: Date?)
     func getGlucoseNotYetUploadedToNightscout() async throws -> [BloodGlucose]
     func getCGMStateNotYetUploadedToNightscout() async throws -> [NightscoutTreatment]
     func getGlucoseNotYetUploadedToHealth() async throws -> [BloodGlucose]
@@ -250,6 +251,30 @@ final class BaseGlucoseStorage: GlucoseStorage, Injectable {
                     as: file
                 )
             }
+        }
+    }
+
+    func storeCGMSensorStart(at sessionStartDate: Date, transmitterID: String? = nil, activationDate: Date? = nil) {
+        storage.transaction { storage in
+            let file = OpenAPS.Monitor.cgmState
+            var treatments = storage.retrieve(file, as: [NightscoutTreatment].self) ?? []
+
+            if let lastTreatment = treatments.last,
+               let createdAt = lastTreatment.createdAt,
+               abs(createdAt.timeIntervalSince(sessionStartDate)) < TimeInterval(60)
+            {
+                return
+            }
+
+            let notes = createCGMStateNotes(transmitterID: transmitterID, activationDate: activationDate)
+            let treatment = createCGMStateTreatment(sessionStartDate: sessionStartDate, notes: notes)
+
+            debug(.deviceManager, "CGM sensor start \(treatment)")
+            treatments.append(treatment)
+            storage.save(
+                treatments.filter { $0.createdAt?.addingTimeInterval(30.days.timeInterval) ?? .distantPast > Date() },
+                as: file
+            )
         }
     }
 
