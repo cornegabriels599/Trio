@@ -167,12 +167,7 @@ extension Screen {
         case .settingsExport:
             SettingsExport.RootView(resolver: resolver)
         case .openSourceClinicConfig:
-            OpenSourceClinicConfigRootView(
-                resolver: resolver,
-                state: OpenSourceClinicConfigModule.StateModel(
-                    provider: OpenSourceClinicConfigModule.Provider(resolver: resolver)
-                )
-            )
+            OpenSourceClinicConfigRootView(resolver: resolver)
         }
     }
 
