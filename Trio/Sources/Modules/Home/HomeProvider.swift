@@ -37,5 +37,14 @@ extension Home {
                 ?? BGTargets(from: OpenAPS.defaults(for: OpenAPS.Settings.bgTargets))
                 ?? BGTargets(units: .mgdL, userPreferredUnits: .mgdL, targets: [])
         }
+
+        func latestCGMSensorStartDate() async -> Date? {
+            let cgmState = await storage.retrieveAsync(OpenAPS.Monitor.cgmState, as: [NightscoutTreatment].self) ?? []
+
+            return cgmState
+                .filter { $0.eventType == .nsSensorChange }
+                .compactMap(\.createdAt)
+                .max()
+        }
     }
 }

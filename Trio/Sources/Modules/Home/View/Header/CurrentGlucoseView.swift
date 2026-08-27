@@ -8,6 +8,7 @@ struct CurrentGlucoseView: View {
     let lowGlucose: Decimal
     let highGlucose: Decimal
     let cgmAvailable: Bool
+    let sensorWarmupStartDate: Date?
     var currentGlucoseTarget: Decimal
     let glucoseColorScheme: GlucoseColorScheme
     let glucose: [GlucoseStored] // This contains the last two glucose values, no matter if its manual or a cgm reading
@@ -41,7 +42,29 @@ struct CurrentGlucoseView: View {
     var body: some View {
         let triangleColor = Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
 
-        if cgmAvailable {
+        if let sensorWarmupRemainingText {
+            VStack(alignment: .center, spacing: 7) {
+                Image(systemName: "sensor.tag.radiowaves.forward.fill")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+
+                Text("Sensor warmt op")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.secondary)
+
+                Text(sensorWarmupRemainingText)
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.primary)
+
+                Text("resterend")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 130, height: 130, alignment: .center)
+        } else if cgmAvailable {
             ZStack {
                 TrendShape(gradient: angularGradient, color: triangleColor)
                     .rotationEffect(.degrees(rotationDegrees))
@@ -145,6 +168,20 @@ struct CurrentGlucoseView: View {
         }
         let delta = lastGlucose - secondLastGlucose
         return deltaFormatter.string(from: delta as NSNumber) ?? "--"
+    }
+
+    private var sensorWarmupRemainingText: String? {
+        guard let sensorWarmupStartDate else {
+            return nil
+        }
+
+        let remaining = sensorWarmupStartDate.addingTimeInterval(60 * 60).timeIntervalSince(timerDate)
+        guard remaining > 0 else {
+            return nil
+        }
+
+        let remainingMinutes = max(0, Int(ceil(remaining / 60)))
+        return "\(remainingMinutes)m"
     }
 }
 

@@ -137,6 +137,7 @@ extension PluginSource: CGMManagerDelegate {
                 debug(.deviceManager, "events from CGM at \(event.date)")
 
                 if event.type == .sensorStart {
+                    self.glucoseStorage.storeCGMSensorStart(at: event.date, transmitterID: nil, activationDate: nil)
                     self.glucoseManager?.removeCalibrations()
                 }
             }

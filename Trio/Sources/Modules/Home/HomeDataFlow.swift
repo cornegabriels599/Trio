@@ -11,4 +11,5 @@ protocol HomeProvider: Provider {
     func getBasalProfile() async -> [BasalProfileEntry]
     func pumpReservoir() async -> Decimal?
     func getBGTargets() async -> BGTargets
+    func latestCGMSensorStartDate() async -> Date?
 }
