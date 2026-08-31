@@ -2,6 +2,7 @@ import CGMBLEKitUI
 import Combine
 import CoreData
 import Foundation
+import LibreTransmitter
 import LoopKit
 import LoopKitUI
 import Observation
@@ -107,6 +108,9 @@ extension Home {
         var pumpStatusBadgeImage: UIImage?
         var pumpStatusBadgeColor: Color?
         var cgmAvailable: Bool = false
+        var isCGMWarmingUp: Bool = false
+        var cgmWarmupMinutesRemaining: Int = 0
+        var cgmWarmupProgress: Double = 0
         var listOfCGM: [CGMModel] = []
         var cgmCurrent = cgmDefaultModel
         var pumpInitialSettings = PumpConfig.PumpInitialSettings.default
@@ -144,6 +148,7 @@ extension Home {
         private let queue = DispatchQueue(label: "HomeStateModel.queue", qos: .utility)
         private var coreDataPublisher: AnyPublisher<Set<NSManagedObjectID>, Never>?
         private var subscriptions = Set<AnyCancellable>()
+        private var cgmWarmupSubscription: AnyCancellable?
 
         typealias PumpEvent = PumpEventStored.EventType
 
@@ -424,6 +429,7 @@ extension Home {
 
         @MainActor private func setupCGMSettings() async {
             cgmAvailable = fetchGlucoseManager.cgmGlucoseSourceType != CGMType.none
+            setupCGMWarmupSubscription()
 
             listOfCGM = (
                 CGMType.allCases.filter { $0 != CGMType.plugin }.map {
@@ -467,6 +473,30 @@ extension Home {
                     displayName: settingsManager.settings.cgm.displayName,
                     subtitle: settingsManager.settings.cgm.subtitle
                 )
+            }
+        }
+
+        @MainActor private func setupCGMWarmupSubscription() {
+            cgmWarmupSubscription = nil
+
+            guard let libreManager = fetchGlucoseManager.cgmManager as? LibreTransmitterManagerV3 else {
+                isCGMWarmingUp = false
+                cgmWarmupMinutesRemaining = 0
+                cgmWarmupProgress = 0
+                return
+            }
+
+            let sensorInfo = libreManager.sensorInfoObservable
+            cgmWarmupSubscription = Publishers.CombineLatest(
+                sensorInfo.$isInWarmup,
+                sensorInfo.$warmupMinutesRemaining
+            )
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isInWarmup, minutesRemaining in
+                guard let self else { return }
+                self.isCGMWarmingUp = isInWarmup
+                self.cgmWarmupMinutesRemaining = minutesRemaining
+                self.cgmWarmupProgress = isInWarmup ? sensorInfo.warmupProgress : 0
             }
         }
 

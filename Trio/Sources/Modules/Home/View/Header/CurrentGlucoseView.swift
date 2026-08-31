@@ -11,6 +11,9 @@ struct CurrentGlucoseView: View {
     var currentGlucoseTarget: Decimal
     let glucoseColorScheme: GlucoseColorScheme
     let glucose: [GlucoseStored] // This contains the last two glucose values, no matter if its manual or a cgm reading
+    let isWarmingUp: Bool
+    let warmupMinutesRemaining: Int
+    let warmupProgress: Double
     @State private var rotationDegrees: Double = 0.0
     @State private var angularGradient = AngularGradient(colors: [
         Color(red: 0.7215686275, green: 0.3411764706, blue: 1),
@@ -41,7 +44,12 @@ struct CurrentGlucoseView: View {
     var body: some View {
         let triangleColor = Color(red: 0.262745098, green: 0.7333333333, blue: 0.9137254902)
 
-        if cgmAvailable {
+        if isWarmingUp {
+            CGMWarmupView(
+                minutesRemaining: warmupMinutesRemaining,
+                progress: warmupProgress
+            )
+        } else if cgmAvailable {
             ZStack {
                 TrendShape(gradient: angularGradient, color: triangleColor)
                     .rotationEffect(.degrees(rotationDegrees))
@@ -145,6 +153,46 @@ struct CurrentGlucoseView: View {
         }
         let delta = lastGlucose - secondLastGlucose
         return deltaFormatter.string(from: delta as NSNumber) ?? "--"
+    }
+}
+
+private struct CGMWarmupView: View {
+    let minutesRemaining: Int
+    let progress: Double
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.gray.opacity(0.2), lineWidth: 8)
+
+            Circle()
+                .trim(from: 0, to: CGFloat(progress))
+                .stroke(
+                    LinearGradient(
+                        colors: [.orange, .yellow],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    style: StrokeStyle(lineWidth: 8, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+                .animation(.linear(duration: 1), value: progress)
+
+            VStack(spacing: 2) {
+                Text("\(minutesRemaining)")
+                    .font(.system(size: 36, weight: .bold, design: .rounded))
+
+                Text(String(localized: "min", comment: "Abbreviation for minutes in sensor warmup countdown"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 130, height: 130)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(String(localized: "Sensor Warming Up"))
+        .accessibilityValue(
+            String(localized: "\(minutesRemaining) minutes remaining", comment: "Sensor warmup time remaining")
+        )
     }
 }
 
