@@ -47,6 +47,7 @@ extension Home.StateModel: CompletionDelegate {
             // are called in parallel.
             try await Task.sleep(for: .seconds(0.2))
             await MainActor.run {
+                refreshCGMWarmupSubscriptionIfNeeded()
                 if fetchGlucoseManager.cgmGlucoseSourceType == .none {
                     cgmCurrent = cgmDefaultModel
                 }

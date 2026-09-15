@@ -149,6 +149,7 @@ extension Home {
         private var coreDataPublisher: AnyPublisher<Set<NSManagedObjectID>, Never>?
         private var subscriptions = Set<AnyCancellable>()
         private var cgmWarmupSubscription: AnyCancellable?
+        private var observedCGMWarmupSensorID: ObjectIdentifier?
 
         typealias PumpEvent = PumpEventStored.EventType
 
@@ -327,6 +328,7 @@ extension Home {
             timer.eventHandler = {
                 DispatchQueue.main.async { [weak self] in
                     self?.timerDate = Date()
+                    self?.refreshCGMWarmupSubscriptionIfNeeded()
                 }
             }
             timer.resume()
@@ -429,7 +431,7 @@ extension Home {
 
         @MainActor private func setupCGMSettings() async {
             cgmAvailable = fetchGlucoseManager.cgmGlucoseSourceType != CGMType.none
-            setupCGMWarmupSubscription()
+            refreshCGMWarmupSubscriptionIfNeeded()
 
             listOfCGM = (
                 CGMType.allCases.filter { $0 != CGMType.plugin }.map {
@@ -476,10 +478,10 @@ extension Home {
             }
         }
 
-        @MainActor private func setupCGMWarmupSubscription() {
-            cgmWarmupSubscription = nil
-
+        @MainActor func refreshCGMWarmupSubscriptionIfNeeded() {
             guard let libreManager = fetchGlucoseManager.cgmManager as? LibreTransmitterManagerV3 else {
+                cgmWarmupSubscription = nil
+                observedCGMWarmupSensorID = nil
                 isCGMWarmingUp = false
                 cgmWarmupMinutesRemaining = 0
                 cgmWarmupProgress = 0
@@ -487,6 +489,11 @@ extension Home {
             }
 
             let sensorInfo = libreManager.sensorInfoObservable
+            let sensorID = ObjectIdentifier(sensorInfo)
+            guard observedCGMWarmupSensorID != sensorID else { return }
+
+            cgmWarmupSubscription = nil
+            observedCGMWarmupSensorID = sensorID
             cgmWarmupSubscription = Publishers.CombineLatest(
                 sensorInfo.$isInWarmup,
                 sensorInfo.$warmupMinutesRemaining
