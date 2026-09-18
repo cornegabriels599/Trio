@@ -49,22 +49,24 @@ jobs:
 
           echo "has_update=true" >> "$GITHUB_OUTPUT"
 
+          commits="$(git log --oneline --no-merges "${local_sha}..${upstream_ref}" --max-count=30)"
           {
             echo "commits<<EOF"
-            git log --oneline --no-merges "${local_sha}..${upstream_ref}" | head -30
+            printf '%s\n' "$commits"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+          watched_files="$(git diff --name-only "${local_sha}..${upstream_ref}" -- \
+            Trio/Sources/Application/TrioApp.swift \
+            Trio/Sources/Modules/Home/View/HomeRootView.swift \
+            Trio/Sources/Modules/Settings/View/Subviews/NotificationsView.swift \
+            Trio/Sources/Services/WatchManager/GarminManager.swift \
+            Trio/Sources/Services/WatchManager/AppleWatchManager.swift \
+            Trio/Sources/Localizations/Main/Localizable.xcstrings \
+            patches/medtrum-fill-indicator.patch)"
           {
             echo "watched_files<<EOF"
-            git diff --name-only "${local_sha}..${upstream_ref}" -- \
-              Trio/Sources/Application/TrioApp.swift \
-              Trio/Sources/Modules/Home/View/HomeRootView.swift \
-              Trio/Sources/Modules/Settings/View/Subviews/NotificationsView.swift \
-              Trio/Sources/Services/WatchManager/GarminManager.swift \
-              Trio/Sources/Services/WatchManager/AppleWatchManager.swift \
-              Trio/Sources/Localizations/Main/Localizable.xcstrings \
-              patches/medtrum-fill-indicator.patch
+            printf '%s\n' "$watched_files"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
