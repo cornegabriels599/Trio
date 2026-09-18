@@ -95,6 +95,13 @@ jobs:
             const localSha = process.env.LOCAL_SHA;
             const commits = (process.env.UPSTREAM_COMMITS || '').trim();
             const watchedFiles = (process.env.WATCHED_FILES || '').trim();
+
+            const repoInfo = await github.rest.repos.get({ owner, repo });
+            if (!repoInfo.data.has_issues) {
+              core.info('Issues are disabled in this repository. Skipping issue creation.');
+              return;
+            }
+
             const title = `Community update available: ${upstreamSha.slice(0, 7)}`;
 
             const body = [
