@@ -10,11 +10,10 @@ on:
 env:
   GH_PAT: ${{ secrets.GH_PAT }}
   UPSTREAM_REPO: nightscout/Trio
-  UPSTREAM_BRANCH: ${{ github.ref_name }} # branch on upstream repository to sync from (replace with specific branch name if needed)
-  TARGET_BRANCH: ${{ github.ref_name }} # target branch on fork to be kept in sync
+  UPSTREAM_BRANCH: main
+  TARGET_BRANCH: ${{ github.ref_name }}
 
 jobs:
-  # use a single runner for these sequential steps
   check_status:
     runs-on: ubuntu-latest
     name: Check status to decide whether to build
@@ -24,22 +23,15 @@ jobs:
       NEW_COMMITS: ${{ steps.sync.outputs.has_new_commits }}
       IS_SECOND_IN_MONTH: ${{ steps.date-check.outputs.is_second_instance }}
 
-    # Check GH_PAT, sync repository, check day in month
     steps:
-
       - name: Access
         id: workflow-permission
         run: |
-          # Validate Access Token
-          
-          # Ensure that gh exit codes are handled when output is piped.
           set -o pipefail
-          
-          # Define patterns to validate the access token (GH_PAT) and distinguish between classic and fine-grained tokens.
+
           GH_PAT_CLASSIC_PATTERN='^ghp_[a-zA-Z0-9]{36}$'
           GH_PAT_FINE_GRAINED_PATTERN='^github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59}$'
-          
-          # Validate Access Token (GH_PAT)
+
           if [ -z "$GH_PAT" ]; then
             failed=true
             echo "::error::The GH_PAT secret is unset or empty. Set it and try again."
@@ -53,14 +45,13 @@ jobs:
               unknown_format=true
               echo "The GH_PAT secret does not have a known token format."
             fi
-            
-            # Attempt to capture the x-oauth-scopes scopes of the token.
+
             if ! scopes=$(curl -sS -f -I -H "Authorization: token $GH_PAT" https://api.github.com | { grep -i '^x-oauth-scopes:' || true; } | cut -d ' ' -f2- | tr -d '\r'); then
               failed=true
               if [ $unknown_format ]; then
                 echo "::error::Unable to connect to GitHub using the GH_PAT secret. Verify that it is set correctly (including the 'ghp_' or 'github_pat_' prefix) and try again."
               else
-                echo "::error::Unable to connect to GitHub using the GH_PAT secret. Verify that the token exists and has not expired at https://github.com/settings/tokens. If necessary, regenerate or create a new token (and update the secret), then try again."
+                echo "::error::Unable to connect to GitHub using the GH_PAT secret. Verify that the token exists and has not expired at https://github.com/settings/tokens. If necessary, regenerate it and try again."
               fi
             elif [[ $scopes =~ workflow ]]; then
               echo "The GH_PAT secret has repo and workflow permissions."
@@ -74,14 +65,13 @@ jobs:
               else
                 echo "The GH_PAT secret is valid and can be used to connect to GitHub, but it only provides the following permission scopes: $scopes"
               fi
-              echo "::error::The GH_PAT secret is lacking at least the 'repo' permission scope required to access the Match-Secrets repository. Update the token permissions at https://github.com/settings/tokens (to include the 'repo' and 'workflow' scopes) and try again."
+              echo "::error::The GH_PAT secret is lacking at least the 'repo' permission scope required to access the Match-Secrets repository. Update the token permissions at https://github.com/settings/tokens and try again."
             else
-              echo "The GH_PAT secret is valid and can be used to connect to GitHub, but it does not provide inspectable scopes. Assuming that the 'repo' and 'workflow' permission scopes required to access the Match-Secrets repository and perform automations are present."
+              echo "The GH_PAT secret is valid and can be used to connect to GitHub, but it does not provide inspectable scopes. Assuming that the 'repo' and 'workflow' permission scopes required to sync and build Trio are available."
               echo "has_permission=true" >> $GITHUB_OUTPUT
             fi
           fi
-          
-          # Exit unsuccessfully if secret validation failed.
+
           if [ $failed ]; then
             exit 2
           fi
@@ -94,9 +84,8 @@ jobs:
         with:
           token: ${{ secrets.GH_PAT }}
 
-      # This syncs any target branch to upstream branch of the same name
       - name: Sync upstream changes
-        if: | # do not run the upstream sync action on the upstream repository
+        if: |
           steps.workflow-permission.outputs.has_permission == 'true' &&
           vars.SCHEDULED_SYNC != 'false' && github.repository_owner != 'nightscout'
         id: sync
@@ -108,7 +97,6 @@ jobs:
           upstream_sync_branch: ${{ env.UPSTREAM_BRANCH }}
           upstream_sync_repo: ${{ env.UPSTREAM_REPO }}
 
-      # Display a sample message based on the sync output var 'has_new_commits'
       - name: New commits found
         if: |
           steps.workflow-permission.outputs.has_permission == 'true' &&
@@ -133,10 +121,8 @@ jobs:
           echo "### :calendar: Scheduled Sync and Build Disabled :mobile_phone_off:" >> $GITHUB_STEP_SUMMARY
           echo "You have not yet configured the scheduled sync and build for Trio's browser build." >> $GITHUB_STEP_SUMMARY
           echo "Synchronizing your fork of <code>Trio</code> with the upstream repository <code>nightscout/Trio</code> will be skipped." >> $GITHUB_STEP_SUMMARY
-          echo "If you want to enable automatic builds and updates for your Trio, please follow the instructions \
-              under the following path <code>Trio/fastlane/testflight.md</code>." >> $GITHUB_STEP_SUMMARY
+          echo "If you want to enable automatic builds and updates for your Trio, please follow the instructions under the following path <code>Trio/fastlane/testflight.md</code>." >> $GITHUB_STEP_SUMMARY
 
-      # Set a logic flag if this is the second instance of this day-of-week in this month
       - name: Check if this is the second time this day-of-week happens this month
         id: date-check
         run: |
@@ -148,35 +134,30 @@ jobs:
             echo "is_second_instance=false" >> "$GITHUB_OUTPUT"
           fi
 
-  # Checks if Distribution certificate is present and valid, optionally nukes and
-  # creates new certs if the repository variable ENABLE_NUKE_CERTS == 'true'
-  # only run if a build is planned
   check_certs:
-      needs: [check_status]
-      name: Check certificates
-      uses: ./.github/workflows/create_certs.yml
-      secrets: inherit
-      if: |
-        github.event_name == 'workflow_dispatch' ||
-          (vars.SCHEDULED_BUILD != 'false' && needs.check_status.outputs.IS_SECOND_IN_MONTH == 'true') ||
-          (vars.SCHEDULED_SYNC != 'false' && needs.check_status.outputs.NEW_COMMITS == 'true' )
+    needs: [check_status]
+    name: Check certificates
+    uses: ./.github/workflows/create_certs.yml
+    secrets: inherit
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+        (vars.SCHEDULED_BUILD != 'false' && needs.check_status.outputs.IS_SECOND_IN_MONTH == 'true') ||
+        (vars.SCHEDULED_SYNC != 'false' && needs.check_status.outputs.NEW_COMMITS == 'true')
 
-  # Builds Trio
   build:
     name: Build
     needs: [check_certs, check_status]
     runs-on: macos-26
     permissions:
       contents: write
-    if:
-      | # builds with manual start; if scheduled: once a month or when new commits are found
+    if: |
       github.event_name == 'workflow_dispatch' ||
         (vars.SCHEDULED_BUILD != 'false' && needs.check_status.outputs.IS_SECOND_IN_MONTH == 'true') ||
-        (vars.SCHEDULED_SYNC != 'false' && needs.check_status.outputs.NEW_COMMITS == 'true' )
+        (vars.SCHEDULED_SYNC != 'false' && needs.check_status.outputs.NEW_COMMITS == 'true')
     steps:
       - name: Select Xcode version
         run: "sudo xcode-select --switch /Applications/Xcode_26.2.app/Contents/Developer"
-      
+
       - name: Checkout Repo for building
         uses: actions/checkout@v5
         with:
@@ -184,42 +165,16 @@ jobs:
           submodules: recursive
           ref: ${{ env.TARGET_BRANCH }}
 
-      # Customize Trio: Use patches or download and apply patches from GitHub
       - name: Customize Trio
         run: |
-
-          # Trio workspace patches
-          # -applies any patches located in the Trio/patches/ directory
           for patch in ./patches/*.patch; do
             [ -e "$patch" ] || continue
             [ "$(basename "$patch")" = "medtrum-fill-indicator.patch" ] && continue
             git apply "$patch" --allow-empty -v --whitespace=fix
           done
 
-          # Download and apply Trio patches from GitHub:
-          # Template for customizing Trio code (as opposed to submodule code)
-          # Remove the "#" sign from the beginning of the line below to activate
-          #   and then replace the alphanumeric string with your SHA, this SHA is NOT valid
-          #curl https://github.com/nightscout/Trio/commit/d206432b024279ef710df462b20bd464cd9682d4.patch | git apply -v --whitespace=fix
-
-          # Download and apply Submodule patches from GitHub:
-          # Template for customizing submodules (you must edit the submodule name)
-          # This example is for G7SensorKit showing you can apply multiple commits, in the proper order
-          # Remove the "#" sign from the beginning of the lines below to activate
-          # This example applies 3 commits from the scan-fix folder; valid only when these are not already in Trio
-          #curl https://github.com/loopandlearn/G7SensorKit/commit/ba44beb3d1491c453f4f438443c3f8ba29146ab3.patch | git apply --directory=G7SensorKit -v --whitespace=fix
-          #curl https://github.com/loopandlearn/G7SensorKit/commit/d86ac8e9cd523d1267587dd70c96597125eef7ab.patch | git apply --directory=G7SensorKit -v --whitespace=fix
-          #curl https://github.com/loopandlearn/G7SensorKit/commit/205054e7537723c2aec58d807634b4853f687244.patch | git apply --directory=G7SensorKit -v --whitespace=fix
-
-          # Add patches for additional customization by following the templates above,
-          # and make sure to specify the submodule by setting "--directory=(submodule_name)".
-          # Several patches may be added per submodule.
-          # Adding comments (#) is strongly recommended to easily tell the individual patches apart.
-
-          # MedtrumKit: show fill reservoir level before priming and require at least 70U.
           git apply ./patches/medtrum-fill-indicator.patch --directory=MedtrumKit --allow-empty -v --whitespace=fix
 
-      # Patch Fastlane Match to not print tables
       - name: Patch Match Tables
         run: |
           TABLE_PRINTER_PATH=$(ruby -e 'puts Gem::Specification.find_by_name("fastlane").gem_dir')/match/lib/match/table_printer.rb
@@ -230,15 +185,12 @@ jobs:
             exit 1
           fi
 
-      # Install project dependencies
       - name: Install Project Dependencies
         run: bundle install
 
-      # Sync the GitHub runner clock with the Windows time server (workaround as suggested in https://github.com/actions/runner/issues/2996)
       - name: Sync clock
         run: sudo sntp -sS time.windows.com
 
-      # Build signed Trio IPA file
       - name: Fastlane Build & Archive
         run: bundle exec fastlane build_trio
         env:
@@ -249,7 +201,6 @@ jobs:
           FASTLANE_KEY: ${{ secrets.FASTLANE_KEY }}
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
 
-      # Upload to TestFlight
       - name: Fastlane upload to TestFlight
         run: bundle exec fastlane release
         env:
@@ -260,7 +211,6 @@ jobs:
           FASTLANE_KEY: ${{ secrets.FASTLANE_KEY }}
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
 
-      # Upload Build artifacts
       - name: Upload build log, IPA and Symbol artifacts
         if: always()
         uses: actions/upload-artifact@v6
