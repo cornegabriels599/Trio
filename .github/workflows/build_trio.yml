@@ -4,23 +4,22 @@ on:
   workflow_dispatch:
   schedule:
     # Check for updates every Sunday
-    #   Later logic builds if there are updates or if it is the 2nd Sunday of the month
     - cron: "43 6 * * 0" # Sunday at UTC 06:43
 
 env:
   GH_PAT: ${{ secrets.GH_PAT }}
   UPSTREAM_REPO: nightscout/Trio
   UPSTREAM_BRANCH: main
-  TARGET_BRANCH: ${{ github.ref_name }}
+  SYNC_BRANCH: sync/upstream-main
 
 jobs:
   check_status:
     runs-on: ubuntu-latest
-    name: Check status to decide whether to build
+    name: Check upstream status and decide whether to build
     permissions:
       contents: write
     outputs:
-      NEW_COMMITS: ${{ steps.sync.outputs.has_new_commits }}
+      NEW_COMMITS: ${{ steps.compare.outputs.has_new_commits }}
       IS_SECOND_IN_MONTH: ${{ steps.date-check.outputs.is_second_instance }}
 
     steps:
@@ -65,9 +64,9 @@ jobs:
               else
                 echo "The GH_PAT secret is valid and can be used to connect to GitHub, but it only provides the following permission scopes: $scopes"
               fi
-              echo "::error::The GH_PAT secret is lacking at least the 'repo' permission scope required to access the Match-Secrets repository. Update the token permissions at https://github.com/settings/tokens and try again."
+              echo "::error::The GH_PAT secret is lacking at least the 'repo' permission scope required to access the repository. Update the token permissions at https://github.com/settings/tokens and try again."
             else
-              echo "The GH_PAT secret is valid and can be used to connect to GitHub, but it does not provide inspectable scopes. Assuming that the 'repo' and 'workflow' permission scopes required to sync and build Trio are available."
+              echo "The GH_PAT secret is valid and can be used to connect to GitHub, but it does not provide inspectable scopes. Assuming that the required repo/workflow permissions are available."
               echo "has_permission=true" >> $GITHUB_OUTPUT
             fi
           fi
@@ -76,57 +75,38 @@ jobs:
             exit 2
           fi
 
-      - name: Checkout target repo
-        if: |
-          steps.workflow-permission.outputs.has_permission == 'true' &&
-          (vars.SCHEDULED_BUILD != 'false' || vars.SCHEDULED_SYNC != 'false')
+      - name: Checkout repo
+        if: steps.workflow-permission.outputs.has_permission == 'true'
         uses: actions/checkout@v5
         with:
           token: ${{ secrets.GH_PAT }}
+          fetch-depth: 0
 
-      - name: Sync upstream changes
-        if: |
-          steps.workflow-permission.outputs.has_permission == 'true' &&
-          vars.SCHEDULED_SYNC != 'false' && github.repository_owner != 'nightscout'
-        id: sync
-        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.2
-        with:
-          target_sync_branch: ${{ env.TARGET_BRANCH }}
-          shallow_since: 6 months ago
-          target_repo_token: ${{ secrets.GH_PAT }}
-          upstream_sync_branch: ${{ env.UPSTREAM_BRANCH }}
-          upstream_sync_repo: ${{ env.UPSTREAM_REPO }}
-
-      - name: New commits found
-        if: |
-          steps.workflow-permission.outputs.has_permission == 'true' &&
-          vars.SCHEDULED_SYNC != 'false' && steps.sync.outputs.has_new_commits == 'true'
-        run: echo "New commits were found to sync."
-
-      - name: No new commits
-        if: |
-          steps.workflow-permission.outputs.has_permission == 'true' &&
-          vars.SCHEDULED_SYNC != 'false' && steps.sync.outputs.has_new_commits == 'false'
-        run: echo "There were no new commits."
-
-      - name: Show value of 'has_new_commits'
-        if: steps.workflow-permission.outputs.has_permission == 'true' && vars.SCHEDULED_SYNC != 'false'
+      - name: Compare against upstream main
+        id: compare
+        if: steps.workflow-permission.outputs.has_permission == 'true'
+        shell: bash
         run: |
-          echo ${{ steps.sync.outputs.has_new_commits }}
-          echo "NEW_COMMITS=${{ steps.sync.outputs.has_new_commits }}" >> $GITHUB_OUTPUT
+          set -euo pipefail
 
-      - name: Show scheduled build configuration message
-        if: steps.workflow-permission.outputs.has_permission != 'true'
-        run: |
-          echo "### :calendar: Scheduled Sync and Build Disabled :mobile_phone_off:" >> $GITHUB_STEP_SUMMARY
-          echo "You have not yet configured the scheduled sync and build for Trio's browser build." >> $GITHUB_STEP_SUMMARY
-          echo "Synchronizing your fork of <code>Trio</code> with the upstream repository <code>nightscout/Trio</code> will be skipped." >> $GITHUB_STEP_SUMMARY
-          echo "If you want to enable automatic builds and updates for your Trio, please follow the instructions under the following path <code>Trio/fastlane/testflight.md</code>." >> $GITHUB_STEP_SUMMARY
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git" || true
+          git fetch --no-tags upstream "${UPSTREAM_BRANCH}:refs/remotes/upstream/${UPSTREAM_BRANCH}"
+
+          local_sha="$(git rev-parse HEAD)"
+          upstream_sha="$(git rev-parse "refs/remotes/upstream/${UPSTREAM_BRANCH}")"
+
+          if git merge-base --is-ancestor "$upstream_sha" "$local_sha"; then
+            echo "has_new_commits=false" >> "$GITHUB_OUTPUT"
+            echo "Fork already contains upstream ${UPSTREAM_BRANCH}."
+            exit 0
+          fi
+
+          echo "has_new_commits=true" >> "$GITHUB_OUTPUT"
+          echo "Upstream has newer commits than the current fork."
 
       - name: Check if this is the second time this day-of-week happens this month
         id: date-check
         run: |
-          DAY_OF_MONTH=$(date +%-d)
           WEEK_OF_MONTH=$(( ($(date +%-d) - 1) / 7 + 1 ))
           if [[ $WEEK_OF_MONTH -eq 2 ]]; then
             echo "is_second_instance=true" >> "$GITHUB_OUTPUT"
@@ -158,24 +138,46 @@ jobs:
       - name: Select Xcode version
         run: "sudo xcode-select --switch /Applications/Xcode_26.2.app/Contents/Developer"
 
-      - name: Checkout Repo for building
+      - name: Checkout repo for build
         uses: actions/checkout@v5
         with:
           token: ${{ secrets.GH_PAT }}
           submodules: recursive
-          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
 
-      - name: Customize Trio
+      - name: Build from upstream main in a safe sync branch and re-apply local patches
+        shell: bash
         run: |
-          for patch in ./patches/*.patch; do
-            [ -e "$patch" ] || continue
-            [ "$(basename "$patch")" = "medtrum-fill-indicator.patch" ] && continue
-            git apply "$patch" --allow-empty -v --whitespace=fix
-          done
+          set -euo pipefail
 
-          git apply ./patches/medtrum-fill-indicator.patch --directory=MedtrumKit --allow-empty -v --whitespace=fix
+          mkdir -p /tmp/trio-local-patches
+          if [ -d patches ]; then
+            cp -R patches /tmp/trio-local-patches/
+          fi
 
-      - name: Patch Match Tables
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git" || true
+          git fetch --no-tags upstream "${UPSTREAM_BRANCH}"
+
+          git checkout -B "${SYNC_BRANCH}" "upstream/${UPSTREAM_BRANCH}"
+
+          if [ -d /tmp/trio-local-patches/patches ]; then
+            rm -rf patches
+            cp -R /tmp/trio-local-patches/patches ./patches
+          fi
+
+          if [ -d ./patches ]; then
+            for patch in ./patches/*.patch; do
+              [ -e "$patch" ] || continue
+              [ "$(basename "$patch")" = "medtrum-fill-indicator.patch" ] && continue
+              git apply "$patch" --allow-empty -v --whitespace=fix
+            done
+
+            if [ -f ./patches/medtrum-fill-indicator.patch ]; then
+              git apply ./patches/medtrum-fill-indicator.patch --directory=MedtrumKit --allow-empty -v --whitespace=fix
+            fi
+          fi
+
+      - name: Patch Fastlane Match to not print tables
         run: |
           TABLE_PRINTER_PATH=$(ruby -e 'puts Gem::Specification.find_by_name("fastlane").gem_dir')/match/lib/match/table_printer.rb
           if [ -f "$TABLE_PRINTER_PATH" ]; then
@@ -185,7 +187,7 @@ jobs:
             exit 1
           fi
 
-      - name: Install Project Dependencies
+      - name: Install project dependencies
         run: bundle install
 
       - name: Sync clock
