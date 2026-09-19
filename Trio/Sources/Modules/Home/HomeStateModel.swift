@@ -14,6 +14,11 @@ import Observation
 import SwiftDate
 import SwiftUI
 
+private struct LibreWarmupLifecycleProgress: DeviceLifecycleProgress {
+    let percentComplete: Double
+    let progressState: DeviceLifecycleProgressState = .normalCGM
+}
+
 extension Home {
     @Observable final class StateModel: BaseStateModel<Provider> {
         @ObservationIgnored @Injected() var broadcaster: Broadcaster!
@@ -563,7 +568,18 @@ extension Home {
                     let source = self.fetchGlucoseManager.glucoseSource
                     let progress: DeviceLifecycleProgress?
                     let displayState: CgmDisplayState?
-                    if let manager {
+                    if let libre = manager as? LibreTransmitterManagerV3,
+                       libre.sensorInfoObservable.isInWarmup
+                    {
+                        progress = LibreWarmupLifecycleProgress(
+                            percentComplete: libre.sensorInfoObservable.warmupProgress
+                        )
+                        displayState = CgmDisplayState(
+                            localizedMessage: String(localized: "Sensor warming up"),
+                            imageName: "hourglass",
+                            status: .normal
+                        )
+                    } else if let manager {
                         progress = manager.cgmLifecycleProgress
                         displayState = manager.cgmStatusHighlight.map {
                             CgmDisplayState(
@@ -929,7 +945,7 @@ extension Home {
         }
 
         /// Wall-clock end of the sensor's warmup window; `nil` when not warming up.
-        /// Note: Libre 2 & Eversense do not emit/have warming up periods
+        /// Direct LibreTransmitter reports its own warmup; Eversense does not.
         private static func resolveWarmupEndsAt(manager: CGMManagerUI?) -> Date? {
             switch manager {
             case let g7 as G7CGMManager:
@@ -965,6 +981,16 @@ extension Home {
             case let accuChek as AccuChekCgmManager:
                 if accuChek.state.calibrationPhase != .done, let warmupCompleted = accuChek.state.cgmWarmupCompleted {
                     return warmupCompleted
+                }
+                return nil
+
+            case let libre as LibreTransmitterManagerV3:
+                if libre.sensorInfoObservable.isInWarmup,
+                   libre.sensorInfoObservable.warmupMinutesRemaining > 0
+                {
+                    return Date().addingTimeInterval(
+                        TimeInterval(libre.sensorInfoObservable.warmupMinutesRemaining * 60)
+                    )
                 }
                 return nil
 
