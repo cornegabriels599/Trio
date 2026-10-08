@@ -41,6 +41,10 @@
 	path = RoundWhiteDiscKit
 	url = https://github.com/loopandlearn/RoundWhiteDiscKit.git
 	branch = main
+[submodule "LibreCRKit"]
+	path = LibreCRKit
+	url = https://github.com/SimonXuku/LibreCRKit.git
+	branch = trio
 [submodule "LibreLoop"]
 	path = LibreLoop
 	url = https://github.com/loopandlearn/LibreLoop.git
