@@ -355,4 +355,79 @@ import UIKit
         #expect(state.progress(at: completion) == 1)
         #expect(!state.isActive(at: completion.addingTimeInterval(5 * 60)))
     }
+
+    @Test("Libre activation retry succeeds after a transient read failure") func testLibreActivationRetrySuccess() {
+        var machine = Libre2ActivationStateMachine(maximumRetries: 3)
+        #expect(machine.apply(.sensorNotYetStarted) == .activating)
+        #expect(machine.apply(.activationAccepted) == .activationAccepted)
+        #expect(machine.apply(.transientReadFailure) == .retrying(attempt: 1))
+        #expect(machine.apply(.confirmationSucceeded) == .confirmed)
+    }
+
+    @Test("Libre activation session loss requests another scan") func testLibreActivationSessionLoss() {
+        var machine = Libre2ActivationStateMachine(maximumRetries: 3)
+        _ = machine.apply(.sensorNotYetStarted)
+        _ = machine.apply(.activationAccepted)
+        #expect(machine.apply(.sessionLost) == .scanAgain)
+    }
+
+    @Test("Libre activation rejection remains a failure") func testLibreActivationRejection() {
+        var machine = Libre2ActivationStateMachine(maximumRetries: 3)
+        _ = machine.apply(.sensorNotYetStarted)
+        #expect(machine.apply(.activationRejected) == .failed)
+    }
+
+    @Test("Libre second scan accepts an already-starting sensor") func testLibreAlreadyStartingSecondScan() {
+        var machine = Libre2ActivationStateMachine(maximumRetries: 3)
+        #expect(machine.apply(.sensorAlreadyStarting) == .confirmed)
+    }
+
+    @Test("Libre activation retry exhaustion requests another scan") func testLibreActivationRetryExhaustion() {
+        var machine = Libre2ActivationStateMachine(maximumRetries: 2)
+        _ = machine.apply(.activationAccepted)
+        #expect(machine.apply(.transientReadFailure) == .retrying(attempt: 1))
+        #expect(machine.apply(.transientReadFailure) == .retrying(attempt: 2))
+        #expect(machine.apply(.transientReadFailure) == .scanAgain)
+    }
+
+    @Test("Libre pending activation is UID-scoped, expires, and reconciles") func testLibrePendingActivationLifecycle() {
+        let suiteName = "DeviceCatalogTests.LibrePendingActivation.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        var now = Date(timeIntervalSinceReferenceDate: 2_000_000)
+        let firstUID = Data([1, 2, 3, 4, 5, 6, 7, 8])
+        let replacementUID = Data([8, 7, 6, 5, 4, 3, 2, 1])
+        let store = PendingLibre2ActivationStore(defaults: defaults, now: { now })
+
+        store.confirm(sensorUID: firstUID, at: now)
+        #expect(store.activationDate(for: firstUID) == now)
+        #expect(store.activationDate(for: replacementUID) == nil)
+
+        store.confirm(sensorUID: firstUID, at: now)
+        now.addTimeInterval(PendingLibre2Activation.maximumLifetime)
+        #expect(store.activationDate(for: firstUID) == nil)
+
+        now = Date(timeIntervalSinceReferenceDate: 3_000_000)
+        store.confirm(sensorUID: firstUID, at: now)
+        store.reconcile(sensorUID: firstUID, authoritativeActivatedAt: now.addingTimeInterval(-60))
+        #expect(store.activationDate(for: firstUID) == nil)
+    }
+
+    @Test("Confirmed Libre activation publishes a warmup ring immediately") func testPendingLibreActivationFeedsHomeWarmup() {
+        let suiteName = "DeviceCatalogTests.LibreWarmupPublication.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let now = Date(timeIntervalSinceReferenceDate: 4_000_000)
+        let uid = Data([1, 1, 2, 2, 3, 3, 4, 4])
+        let store = PendingLibre2ActivationStore(defaults: defaults, now: { now })
+        store.confirm(sensorUID: uid, at: now)
+
+        let activatedAt = store.activationDate(for: uid)
+        #expect(activatedAt != nil)
+        let state = LibreWarmupDisplayState(activatedAt: activatedAt!, duration: 60 * 60)
+        #expect(state.isActive(at: now))
+        #expect(state.progress(at: now) == 0)
+    }
 }
