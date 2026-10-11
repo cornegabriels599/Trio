@@ -29,6 +29,9 @@ CUSTOM_CONFLICT_FILES=""
 CUSTOM_BEFORE_SHA=""
 UPSTREAM_MAIN_SHA=""
 UPSTREAM_DEV_SHA=""
+LIBRECRKIT_URL="https://github.com/SimonXuku/LibreCRKit.git"
+LIBRECRKIT_BRANCH="trio"
+LIBRELOOP_BRANCH="trio"
 
 OVERLAY_FILES=(
   ".github/app-flavors.yml"
@@ -124,10 +127,44 @@ restore_overlay_if_needed() {
   fi
 }
 
+set_gitmodule_value() {
+  local key="$1"
+  local value="$2"
+  local current
+
+  current="$(git config -f .gitmodules --get "${key}" 2>/dev/null || true)"
+  if [[ "${current}" != "${value}" ]]; then
+    git config -f .gitmodules "${key}" "${value}"
+  fi
+}
+
+preserve_libre_submodule_overlay() {
+  local librecrkit_sha="$1"
+
+  [[ -f .gitmodules ]] || touch .gitmodules
+  set_gitmodule_value submodule.LibreCRKit.path LibreCRKit
+  set_gitmodule_value submodule.LibreCRKit.url "${LIBRECRKIT_URL}"
+  set_gitmodule_value submodule.LibreCRKit.branch "${LIBRECRKIT_BRANCH}"
+  set_gitmodule_value submodule.LibreLoop.branch "${LIBRELOOP_BRANCH}"
+  git add -- .gitmodules
+
+  # Keep the fork's tested LibreCRKit pin even when upstream removes the
+  # submodule. Other upstream submodule changes remain untouched.
+  git update-index --add --cacheinfo "160000,${librecrkit_sha},LibreCRKit"
+}
+
 resolve_vanilla_conflicts() {
   local backup="$1"
+  local librecrkit_sha="$2"
   local file
   local unresolved
+
+  if git diff --name-only --diff-filter=U | grep -Fxq ".gitmodules"; then
+    echo "Keeping upstream submodule changes plus the Libre overlays"
+    git checkout --theirs -- .gitmodules
+    git add -- .gitmodules
+  fi
+
   for file in "${OVERLAY_FILES[@]}"; do
     if [[ -f "${backup}/${file}" ]] && git diff --name-only --diff-filter=U | grep -Fxq "${file}"; then
       echo "Keeping overlay version of conflicted ${file}"
@@ -143,6 +180,7 @@ resolve_vanilla_conflicts() {
     git merge --abort || true
     return 1
   fi
+  preserve_libre_submodule_overlay "${librecrkit_sha}"
   git commit --no-edit
 }
 
@@ -160,10 +198,11 @@ mark_vanilla_updated() {
 sync_vanilla() {
   local branch="$1"
   local upstream_ref="$2"
-  local local_sha upstream_sha backup
+  local local_sha upstream_sha backup librecrkit_sha
 
   local_sha="$(git rev-parse "refs/remotes/origin/${branch}")"
   upstream_sha="$(git rev-parse "${upstream_ref}")"
+  librecrkit_sha="$(git rev-parse "refs/remotes/origin/${branch}:LibreCRKit")"
 
   echo "## ${branch}" >> "${GITHUB_STEP_SUMMARY}"
   echo >> "${GITHUB_STEP_SUMMARY}"
@@ -189,7 +228,7 @@ sync_vanilla() {
   else
     echo "Fast-forward blocked on ${branch} (overlay commit); merging ${upstream_ref}"
     if ! git merge --no-ff --no-edit "${upstream_ref}"; then
-      if ! resolve_vanilla_conflicts "${backup}"; then
+      if ! resolve_vanilla_conflicts "${backup}" "${librecrkit_sha}"; then
         echo "- Merge failed; conflicts left unresolved." >> "${GITHUB_STEP_SUMMARY}"
         echo >> "${GITHUB_STEP_SUMMARY}"
         return 1
@@ -199,6 +238,10 @@ sync_vanilla() {
   fi
 
   restore_overlay_if_needed "${backup}"
+  preserve_libre_submodule_overlay "${librecrkit_sha}"
+  if ! git diff --cached --quiet; then
+    git commit -m "Keep Libre submodule overlay after Nightscout sync"
+  fi
   git push origin "HEAD:refs/heads/${branch}"
   git fetch --no-tags origin "${branch}"
   mark_vanilla_updated "${branch}"
@@ -219,10 +262,11 @@ custom_files_present() {
 }
 
 sync_custom() {
-  local local_sha upstream_sha
+  local local_sha upstream_sha librecrkit_sha
 
   local_sha="$(git rev-parse "refs/remotes/origin/${CUSTOM_BRANCH}")"
   upstream_sha="$(git rev-parse refs/remotes/upstream/main)"
+  librecrkit_sha="$(git rev-parse "refs/remotes/origin/${CUSTOM_BRANCH}:LibreCRKit")"
   CUSTOM_BEFORE_SHA="${local_sha}"
 
   echo "## ${CUSTOM_BRANCH}" >> "${GITHUB_STEP_SUMMARY}"
@@ -239,11 +283,20 @@ sync_custom() {
 
   git branch -f sync/custom "refs/remotes/origin/${CUSTOM_BRANCH}"
   git switch sync/custom
+  preserve_libre_submodule_overlay "${librecrkit_sha}"
+  if ! git diff --cached --quiet; then
+    git commit -m "Keep Libre submodule overlay before Nightscout sync"
+  fi
+  git submodule sync --recursive
   # Submodule pointer commits (LibreTransmitter, etc.) conflict as
   # "not checked out" unless the submodule is present before rebase.
   git submodule update --init --recursive
 
   if git rebase refs/remotes/upstream/main; then
+    preserve_libre_submodule_overlay "${librecrkit_sha}"
+    if ! git diff --cached --quiet; then
+      git commit -m "Keep Libre submodule overlay after Nightscout sync"
+    fi
     if ! custom_files_present; then
       echo "::error::Rebase succeeded but clinic/overlay files are missing. Not pushing."
       git reset --hard "${local_sha}"
