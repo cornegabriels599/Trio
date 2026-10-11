@@ -109,8 +109,10 @@ jobs:
       # Disabled: Sunday Sync All Tracks updates main, dev, and
       # upgrade/trio-1.0. Fork-Sync-With-Upstream rebases a single branch
       # and must not run here (it would rewrite custom history unsafely).
+      # actionlint rejects a literal `if: false`, so this uses a repository
+      # check that is never true when GitHub runs the workflow.
       - name: Sync upstream changes
-        if: false
+        if: github.repository == ''
         id: sync
         uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.2
         with:
