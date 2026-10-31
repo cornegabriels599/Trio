@@ -28,6 +28,7 @@ extension OpenSourceClinicConfigModule {
             UserDefaults.standard.set(isEnabled, forKey: OpenSourceClinicConfig.Keys.isEnabled)
             UserDefaults.standard.set(syncInterval, forKey: OpenSourceClinicConfig.Keys.syncInterval)
             provider.keychain.setValue(token, forKey: OpenSourceClinicConfig.Keys.token)
+            provider.openSourceClinicManager.startAutomaticSync()
         }
 
         func testConnection() async {

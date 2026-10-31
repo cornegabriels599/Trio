@@ -34,17 +34,7 @@ extension OpenSourceClinicConfigModule {
                                 .autocapitalization(.none)
                         }
 
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Sync Interval")
-                                .font(.headline)
-                            Picker("Interval", selection: $state.syncInterval) {
-                                Text("5 min").tag(TimeInterval(300))
-                                Text("10 min").tag(TimeInterval(600))
-                                Text("15 min").tag(TimeInterval(900))
-                                Text("30 min").tag(TimeInterval(1800))
-                            }
-                            .pickerStyle(.segmented)
-                        }
+
                     }
                 ).listRowBackground(Color.chart)
 

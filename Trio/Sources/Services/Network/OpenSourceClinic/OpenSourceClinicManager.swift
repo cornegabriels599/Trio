@@ -6,6 +6,9 @@ import UIKit
 
 protocol OpenSourceClinicManager {
     func syncAll() async
+    func startAutomaticSync()
+    func stopAutomaticSync()
+    func syncAfterGlucoseUpdate()
     func uploadGlucose() async
     func uploadPreferences() async
     func uploadTherapyProfile() async
@@ -24,6 +27,9 @@ final class BaseOpenSourceClinicManager: OpenSourceClinicManager, Injectable {
     private var backgroundContext = CoreDataStack.shared.newTaskContext()
 
     var lastSyncDate: Date?
+    private var automaticSyncTimer: DispatchSourceTimer?
+    private var lastGlucoseTriggeredSync: Date = .distantPast
+    private var glucoseSyncInFlight = false
 
     init(resolver: Resolver) {
         injectServices(resolver)
@@ -44,6 +50,48 @@ final class BaseOpenSourceClinicManager: OpenSourceClinicManager, Injectable {
             return value ?? ""
         }
         return ""
+    }
+
+    // MARK: - Foreground automatic sync
+
+    // iOS does not guarantee a five-minute background execution interval.
+    // This timer runs only while Trio is active and is stopped on backgrounding.
+    func startAutomaticSync() {
+        stopAutomaticSync()
+        guard isEnabled else { return }
+
+        let configured = UserDefaults.standard.double(forKey: OpenSourceClinicConfig.Keys.syncInterval)
+        let interval = configured > 0 ? configured : OpenSourceClinicConfig.Defaults.syncInterval
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + max(60, interval), repeating: max(60, interval))
+        timer.setEventHandler { [weak self] in
+            guard let self = self, self.isEnabled else { return }
+            Task { await self.syncAll() }
+        }
+        automaticSyncTimer = timer
+        timer.resume()
+    }
+
+    func stopAutomaticSync() {
+        automaticSyncTimer?.cancel()
+        automaticSyncTimer = nil
+    }
+
+    // MARK: - Glucose-driven sync
+
+    // Called from the existing Nightscout glucose upload trigger, independently
+    // of whether Nightscout's own HTTP request succeeds.
+    func syncAfterGlucoseUpdate() {
+        guard isEnabled, !glucoseSyncInFlight else { return }
+        let configured = UserDefaults.standard.double(forKey: OpenSourceClinicConfig.Keys.syncInterval)
+        let interval = max(60, configured > 0 ? configured : OpenSourceClinicConfig.Defaults.syncInterval)
+        guard Date().timeIntervalSince(lastGlucoseTriggeredSync) >= interval else { return }
+        glucoseSyncInFlight = true
+        lastGlucoseTriggeredSync = Date()
+        Task { [weak self] in
+            await self?.syncAll()
+            self?.glucoseSyncInFlight = false
+        }
     }
 
     // MARK: - Full Sync

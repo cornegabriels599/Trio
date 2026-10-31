@@ -103,6 +103,7 @@ extension Notification.Name {
         // seeded DeviceAlertsStore in place before re-presenting alerts.
         resolver.resolve(TrioAlertManager.self)!.replayUnacknowledgedAlerts()
 
+        resolver.resolve(OpenSourceClinicManager.self)?.startAutomaticSync()
         startTelemetry()
     }
 
@@ -440,6 +441,7 @@ extension Notification.Name {
 
             /// If the App goes to the background we should ensure that all the changes are saved from the viewContext to the Persistent Container
             if newScenePhase == .background {
+                resolver.resolve(OpenSourceClinicManager.self)?.stopAutomaticSync()
                 coreDataStack.save()
             }
 
@@ -452,6 +454,7 @@ extension Notification.Name {
                 }
                 presentDevelopmentBranchWarningIfNeeded()
                 if initState.complete {
+                    resolver.resolve(OpenSourceClinicManager.self)?.startAutomaticSync()
                     performCleanupIfNecessary()
                 }
             }
