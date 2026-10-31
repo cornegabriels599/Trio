@@ -52,6 +52,12 @@ final class BaseNightscoutManager: NightscoutManager, Injectable {
     /// Request an upload for a pipeline (enqueue work). Safe to call from anywhere.
     /// Bursts of requests coalesce: at most one run follows the one currently in flight.
     func requestUpload(_ uploadPipeline: NightscoutUploadPipeline) {
+        if case .glucose = uploadPipeline {
+            // OSC is independent of Nightscout upload success.
+            // This piggybacks on the existing glucose-data change trigger.
+            let osc = TrioApp.resolver.resolve(OpenSourceClinicManager.self)
+            osc?.syncAfterGlucoseUpdate()
+        }
         Task(priority: .utility) { [weak self] in
             await self?.uploadSerializer.request(uploadPipeline)
         }
