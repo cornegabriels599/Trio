@@ -8,6 +8,7 @@ protocol OpenSourceClinicManager {
     func syncAll() async
     func startAutomaticSync()
     func stopAutomaticSync()
+    func syncAfterGlucoseUpdate()
     func uploadGlucose() async
     func uploadPreferences() async
     func uploadTherapyProfile() async
@@ -27,6 +28,8 @@ final class BaseOpenSourceClinicManager: OpenSourceClinicManager, Injectable {
 
     var lastSyncDate: Date?
     private var automaticSyncTimer: DispatchSourceTimer?
+    private var lastGlucoseTriggeredSync: Date = .distantPast
+    private var glucoseSyncInFlight = false
 
     init(resolver: Resolver) {
         injectServices(resolver)
@@ -72,6 +75,23 @@ final class BaseOpenSourceClinicManager: OpenSourceClinicManager, Injectable {
     func stopAutomaticSync() {
         automaticSyncTimer?.cancel()
         automaticSyncTimer = nil
+    }
+
+    // MARK: - Glucose-driven sync
+
+    // Called from the existing Nightscout glucose upload trigger, independently
+    // of whether Nightscout's own HTTP request succeeds.
+    func syncAfterGlucoseUpdate() {
+        guard isEnabled, !glucoseSyncInFlight else { return }
+        let configured = UserDefaults.standard.double(forKey: OpenSourceClinicConfig.Keys.syncInterval)
+        let interval = max(60, configured > 0 ? configured : OpenSourceClinicConfig.Defaults.syncInterval)
+        guard Date().timeIntervalSince(lastGlucoseTriggeredSync) >= interval else { return }
+        glucoseSyncInFlight = true
+        lastGlucoseTriggeredSync = Date()
+        Task { [weak self] in
+            await self?.syncAll()
+            self?.glucoseSyncInFlight = false
+        }
     }
 
     // MARK: - Full Sync
